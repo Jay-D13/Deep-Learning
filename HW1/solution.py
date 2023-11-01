@@ -229,7 +229,6 @@ class MLP(object):
       return np.where(x > 0, 1, 0)
 
     elif self.activation == "sigmoid":
-      # https://math.stackexchange.com/questions/78575/derivative-of-sigmoid-function-sigma-x-frac11e-x
       return self.activation_fn(x) * (1 - self.activation_fn(x))
 
     elif self.activation == "tanh":
@@ -316,11 +315,10 @@ class MLP(object):
     w = self.parameters[layer_number - 1]['w']
 
     # WRITE CODE HERE
-    if layer_number == len(self.layer_dims):
+    if layer_number == len(self.parameters):
       gradient_o = gradient
     else:
       gradient_o = gradient * self.gradient_activation_fn(a)
-      pass
 
     gradient_w = np.dot(a_prev.T, gradient_o) / a_prev.shape[0]
     gradient_b = np.sum(gradient_o, axis=0, keepdims=True) / a_prev.shape[0]
@@ -472,7 +470,7 @@ class Convolution2dLayer(object):
               for a list of inputs, h and w must be consistent across the inputs.
 
     :returns: a generator that produces the current 'view' of the input and its indices given the stride
-              it will be a tuple of following format: ( view's row index, view's column index, view with shape (batch size, 1, stride, stride) )
+              it will be a tuple of following format: ( view's row index, view's column index, view with shape (batch size, 1, filtersize, filtersize) )
 
     """
     rows, cols = x.shape[2], x.shape[3]
@@ -529,9 +527,10 @@ class Convolution2dLayer(object):
       for h in range(self.filter_size):
         for w in range(self.filter_size):
           # WRITE CODE HERE
-          view = x[:,:,h:h+grad_output.shape[2],w:w+grad_output.shape[3]]
-          grads[i,h,w] = np.sum(grad_output[:, i, h, w] * view[:, :, i, j])
-
+          for view_h, view_w, view in self._get_filtersizeXfiltersize_views(x):
+            grads[i,h,w] += np.sum(grad_output[:,i,view_h,view_w] * view[:,0,h,w])
+          
+    
     return grads
 
 # %% [markdown]
@@ -560,7 +559,7 @@ class MaxPooling2dLayer(object):
     :param x: input of shape (batch size, 1, h, w). We assume input has only 1 channel.
 
     :returns: a generator that produce the current 'view' of the input with the given stride,
-              will be a tuple of following format: ( view's row index, view's column index, view itself with shape (batch size, 1, stride, stride) )
+              will be a tuple of following format: ( view's row index, view's column index, view itself with shape (batch size, 1, filtersize, filtersize) )
     """
     rows, cols = x.shape[2], x.shape[3]
 
@@ -568,9 +567,9 @@ class MaxPooling2dLayer(object):
     for i in range(0, rows, self.filter_size):
       for j in range(0, cols, self.filter_size):
         if i + self.filter_size - 1 < rows and j + self.filter_size - 1 < cols:
-          #WRITE CODE HERE
-          # yield ...
-          pass
+          # WRITE CODE HERE
+          view = x[:, :, i:i+self.filter_size, j:j+self.filter_size]
+          yield int(i/self.filter_size), int(j/self.filter_size), view # Thank you to this person: https://piazza.com/class/llwrh1h563766f/post/79 :)
 
   def forward(self, x):
     """
@@ -590,8 +589,7 @@ class MaxPooling2dLayer(object):
 
     for view_h, view_w, view in self._get_filtersizeXfiltersize_views(x):
       # WRITE CODE HERE
-      # cache["out"][:, :, ?, ?] = ?
-      pass
+      cache["out"][:, :, view_h, view_w] = np.max(view, axis=(2,3))
 
     return cache
 
@@ -610,8 +608,12 @@ class MaxPooling2dLayer(object):
 
     for view_h, view_w, view in self._get_filtersizeXfiltersize_views(x):
       # WRITE CODE HERE
-      pass
+      mask = np.max(view, axis=(2,3), keepdims=True) == view
+      i = view_h * self.filter_size
+      j = view_w * self.filter_size
+      grads[:, :, i:i+self.filter_size, j:j+self.filter_size] = mask * grad_output[:, :, view_h:view_h+1, view_w:view_w+1]
 
+      
     return grads
 
 # %% [markdown]
@@ -624,10 +626,12 @@ class MaxPooling2dLayer(object):
 # %%
 # Imports
 import torch
+from tqdm.notebook import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import torch.optim as optim
+from torch.optim import lr_scheduler
 import torchvision
 import torchvision.transforms as transforms
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -649,54 +653,69 @@ class VGG16(nn.Module):
 
       activation_str: string, default "relu"
         Activation function to use.
+
     """
     super(VGG16, self).__init__()
 
-    self.n_classes = None # WRITE CODE HERE
+    self.n_classes = 10
     self.activation_str = activation_str
-    self.initialization = initialization
 
-    self.conv_layer_1 = None # WRITE CODE HERE
-    self.conv_layer_2 = None # WRITE CODE HERE
-    self.conv_layer_3 = None # WRITE CODE HERE
-    self.conv_layer_4 = None # WRITE CODE HERE
-    self.conv_layer_5 = None # WRITE CODE HERE
-    self.conv_layer_6 = None # WRITE CODE HERE
-    self.conv_layer_7 = None # WRITE CODE HERE
-    self.conv_layer_8 = None # WRITE CODE HERE
-    self.conv_layer_9 = None # WRITE CODE HERE
-    self.conv_layer_10 = None # WRITE CODE HERE
-    self.conv_layer_11 = None # WRITE CODE HERE
-    self.conv_layer_12 = None # WRITE CODE HERE
-    self.conv_layer_13 = None # WRITE CODE HERE
+    self.conv_layer_1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_2 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_4 = nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_5 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_6 = nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_7 = nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_8 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_9 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_10 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_11 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_12 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1)
+    self.conv_layer_13 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1)
 
     # Add 2D batch normalization after every convolutional layer
-    self.conv_layer_1_bn = None # WRITE CODE HERE
-    self.conv_layer_2_bn = None # WRITE CODE HERE
-    self.conv_layer_3_bn = None # WRITE CODE HERE
-    self.conv_layer_4_bn = None # WRITE CODE HERE
-    self.conv_layer_5_bn = None # WRITE CODE HERE
-    self.conv_layer_6_bn = None # WRITE CODE HERE
-    self.conv_layer_7_bn = None # WRITE CODE HERE
-    self.conv_layer_8_bn = None # WRITE CODE HERE
-    self.conv_layer_9_bn = None # WRITE CODE HERE
-    self.conv_layer_10_bn = None # WRITE CODE HERE
-    self.conv_layer_11_bn = None # WRITE CODE HERE
-    self.conv_layer_12_bn = None # WRITE CODE HERE
-    self.conv_layer_13_bn = None # WRITE CODE HERE
+    self.conv_layer_1_bn = nn.BatchNorm2d(num_features=64)
+    self.conv_layer_2_bn = nn.BatchNorm2d(num_features=64)
+    self.conv_layer_3_bn = nn.BatchNorm2d(num_features=128)
+    self.conv_layer_4_bn = nn.BatchNorm2d(num_features=128)
+    self.conv_layer_5_bn = nn.BatchNorm2d(num_features=256)
+    self.conv_layer_6_bn = nn.BatchNorm2d(num_features=256)
+    self.conv_layer_7_bn = nn.BatchNorm2d(num_features=256)
+    self.conv_layer_8_bn = nn.BatchNorm2d(num_features=512)
+    self.conv_layer_9_bn = nn.BatchNorm2d(num_features=512)
+    self.conv_layer_10_bn = nn.BatchNorm2d(num_features=512)
+    self.conv_layer_11_bn = nn.BatchNorm2d(num_features=512)
+    self.conv_layer_12_bn = nn.BatchNorm2d(num_features=512)
+    self.conv_layer_13_bn = nn.BatchNorm2d(num_features=512)
 
-    self.max_pool_layer_1 = None # WRITE CODE HERE
-    self.max_pool_layer_2 = None # WRITE CODE HERE
-    self.max_pool_layer_3 = None # WRITE CODE HERE
-    self.max_pool_layer_4 = None # WRITE CODE HERE
-    self.max_pool_layer_5 = None # WRITE CODE HERE
+    self.max_pool_layer_1 = nn.MaxPool2d(kernel_size=2, stride=2)
+    self.max_pool_layer_2 = nn.MaxPool2d(kernel_size=2, stride=2)
+    self.max_pool_layer_3 = nn.MaxPool2d(kernel_size=2, stride=2)
+    self.max_pool_layer_4 = nn.MaxPool2d(kernel_size=2, stride=2)
+    self.max_pool_layer_5 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-    self.fc_1 = None # WRITE CODE HERE
-    self.fc_2 = None # WRITE CODE HERE
-    self.fc_3 = None # WRITE CODE HERE
+    self.fc_1 = nn.Linear(in_features=25088, out_features=4096) # flattened size is 512×7×7=25088
+    self.fc_2 = nn.Linear(in_features=4096, out_features=4096)
+    self.fc_3 = nn.Linear(in_features=4096, out_features=self.n_classes)
 
     # Initialize the weights of each trainable layer of your network using xavier_normal initialization
-    # WRITE CODE HERE
+    init.xavier_uniform_(self.conv_layer_1.weight)
+    init.xavier_uniform_(self.conv_layer_2.weight)
+    init.xavier_uniform_(self.conv_layer_3.weight)
+    init.xavier_uniform_(self.conv_layer_4.weight)
+    init.xavier_uniform_(self.conv_layer_5.weight)
+    init.xavier_uniform_(self.conv_layer_6.weight)
+    init.xavier_uniform_(self.conv_layer_7.weight)
+    init.xavier_uniform_(self.conv_layer_8.weight)
+    init.xavier_uniform_(self.conv_layer_9.weight)
+    init.xavier_uniform_(self.conv_layer_10.weight)
+    init.xavier_uniform_(self.conv_layer_11.weight)
+    init.xavier_uniform_(self.conv_layer_12.weight)
+    init.xavier_uniform_(self.conv_layer_13.weight)
+    init.xavier_uniform_(self.fc_1.weight)
+    init.xavier_uniform_(self.fc_2.weight)
+    init.xavier_uniform_(self.fc_3.weight)
 
   def activation(self, input):
     """
@@ -707,11 +726,9 @@ class VGG16(nn.Module):
         E.g. if self.activation_str is "relu", return relu(input).
     """
     if self.activation_str == "relu":
-      # WRITE CODE HERE
-      pass
+      return F.relu(input)
     elif self.activation_str == "tanh":
-      # WRITE CODE HERE
-      pass
+      return F.tanh(input)
     else:
       raise Exception("Invalid activation")
     return 0
@@ -736,8 +753,45 @@ class VGG16(nn.Module):
 
       Outputs: Returns the output of the forward pass of the network.
     """
-    # WRITE CODE HERE
-    pass
+    x = self.conv_layer_1_bn(self.conv_layer_1(x))
+    x = self.activation(x)
+    x = self.conv_layer_2_bn(self.conv_layer_2(x))
+    x = self.activation(x)
+    x = self.max_pool_layer_1(x)
+    x = self.conv_layer_3_bn(self.conv_layer_3(x))
+    x = self.activation(x)
+    x = self.conv_layer_4_bn(self.conv_layer_4(x))
+    x = self.activation(x)
+    x = self.max_pool_layer_2(x)
+    x = self.conv_layer_5_bn(self.conv_layer_5(x))
+    x = self.activation(x)
+    x = self.conv_layer_6_bn(self.conv_layer_6(x))
+    x = self.activation(x)
+    x = self.conv_layer_7_bn(self.conv_layer_7(x))
+    x = self.activation(x)
+    x = self.max_pool_layer_3(x)
+    x = self.conv_layer_8_bn(self.conv_layer_8(x))
+    x = self.activation(x)
+    x = self.conv_layer_9_bn(self.conv_layer_9(x))
+    x = self.activation(x)
+    x = self.conv_layer_10_bn(self.conv_layer_10(x))
+    x = self.activation(x)
+    x = self.max_pool_layer_4(x)
+    x = self.conv_layer_11_bn(self.conv_layer_11(x))
+    x = self.activation(x)
+    x = self.conv_layer_12_bn(self.conv_layer_12(x))
+    x = self.activation(x)
+    x = self.conv_layer_13_bn(self.conv_layer_13(x))
+    x = self.activation(x)
+    x = self.max_pool_layer_5(x)
+    x = x.view(x.size(0), -1) # flatten
+    x = self.fc_1(x)
+    x = self.activation(x)
+    x = self.fc_2(x)
+    x = self.activation(x)
+    x = self.fc_3(x)
+    x = F.softmax(x, dim=1)
+    return x
 
 
 # %% [markdown]
@@ -760,12 +814,12 @@ def get_cifar10():
   train_dataset = torchvision.datasets.CIFAR10(
       root='./data', train=True, download=True, transform=transform)
   train_loader = torch.utils.data.DataLoader(
-      train_dataset, batch_size=64, shuffle=True, num_workers=2)
+      train_dataset, batch_size=32, shuffle=True, num_workers=2)
 
   val_dataset = torchvision.datasets.CIFAR10(
       root='./data', train=False, download=True, transform=transform)
   val_loader = torch.utils.data.DataLoader(
-      val_dataset, batch_size=64, shuffle=False, num_workers=2)
+      val_dataset, batch_size=32, shuffle=False, num_workers=2)
 
   return train_loader, val_loader
 
@@ -788,6 +842,17 @@ def train_loop(epoch, model, train_loader, criterion, optimizer):
   train_loss = 0.
 
   # WRITE CODE HERE
+  for x, y in train_loader:
+    x, y = x.to(device), y.to(device)
+    
+    optimizer.zero_grad()
+    y_hat = model.forward(x)
+    loss = criterion(y_hat, y)
+    loss.backward()
+    optimizer.step()
+    
+    train_acc += (y_hat.argmax(axis=-1) == y).sum().item()
+    train_loss += loss.item()
 
   print(f"Epoch: {epoch} | Train Acc: {train_acc:.6f} | Train Loss: {train_loss:.6f}")
   return train_acc, train_loss
@@ -809,6 +874,14 @@ def valid_loop(epoch, model, val_loader, criterion):
   val_loss = 0.
 
   # WRITE CODE HERE
+  for x, y in val_loader:
+    x, y = x.to(device), y.to(device)
+    
+    y_hat = model.forward(x)
+    loss = criterion(y_hat, y)
+    
+    val_acc += (y_hat.argmax(axis=-1) == y).sum().item()
+    val_loss += loss.item()
 
   print(f"Epoch: {epoch} | Val Acc: {val_acc:.6f}   | Val Loss: {val_loss:.6f}")
   return val_acc, val_loss
@@ -816,20 +889,26 @@ def valid_loop(epoch, model, val_loader, criterion):
 # %%
 if __name__ == "__main__":
   activation_str = "relu"
-  initialization = "xavier_normal"
   train_accs, train_losses, val_accs, val_losses = [], [], [], []
   n_epochs = 25
 
   model = VGG16(
     activation_str=activation_str,
-    initialization=initialization
   ).to(device)
   criterion = nn.CrossEntropyLoss()
   optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
   train_loader, val_loader = get_cifar10()
 
-  for epoch in range(n_epochs):
+  best = 0
+  count = 0
+  lr_reduction_count =0
+  
+  patience_lr = 1
+  factor = 0.1 
+  scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=factor, patience=patience_lr, verbose=True)
+
+  for epoch in tqdm(range(n_epochs)):
     # Training
     train_acc, train_loss = train_loop(epoch, model, train_loader, criterion, optimizer)
     train_accs.append(train_acc)
@@ -839,6 +918,27 @@ if __name__ == "__main__":
     val_acc, val_loss = valid_loop(epoch, model, val_loader, criterion)
     val_accs.append(val_acc)
     val_losses.append(val_loss)
+
+    scheduler.step(val_acc)
+
+    if val_acc >= best:
+        best = val_acc
+        torch.save(model.state_dict(), 'saved_best.pt')
+        count = 0
+    else:
+        count += 1
+        if count == 5:
+            print("Stopping early. Accuracy hasn't improved")
+            model.load_state_dict(torch.load('saved_best.pt'))
+            break
+
+    for param_group in optimizer.param_groups:
+        if param_group['lr'] == 0.001 * (factor ** (lr_reduction_count + 1)):
+            lr_reduction_count += 1
+
+    if lr_reduction_count == 3:
+        print("Stopping early. Learning rate hasn't improved")
+        break
 
 # %% [markdown]
 # ### Questions 3.4 to 3.10
