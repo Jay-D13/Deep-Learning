@@ -36,27 +36,29 @@ class LayerNorm(nn.Module):
         outputs (`torch.FloatTensor` of shape `(*dims, hidden_size)`)
             The output tensor, having the same shape as `inputs`.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        mean = torch.mean(inputs, dim=-1, keepdim=True)
+        var = 1/inputs.shape[-1] * torch.sum((inputs - mean)**2, dim=-1, keepdim=True)
+        outputs = (inputs - mean) / torch.sqrt(var + self.eps)
+        return outputs * self.weight + self.bias
 
     def reset_parameters(self):
         nn.init.ones_(self.weight)
         nn.init.zeros_(self.bias)
 
-
+# TODO precise inspiration from :https://www.youtube.com/watch?v=U0s0f995w14 in report
 class MultiHeadedAttention(nn.Module):
     def __init__(self, head_size, num_heads, sequence_length):
         super(MultiHeadedAttention, self).__init__()
-        self.head_size = head_size
-        self.num_heads = num_heads
-        self.sequence_length = sequence_length
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
+        self.head_size = head_size # head dimension d
+        self.num_heads = num_heads # number of heads m
+        self.sequence_length = sequence_length # sequence length n
+        self.hidden_size = num_heads * head_size # dimension of the hidden state D = m*d
+        
+        self.W_Q = nn.Linear(self.hidden_size, self.hidden_size)
+        self.W_K = nn.Linear(self.hidden_size, self.hidden_size)
+        self.W_V = nn.Linear(self.hidden_size, self.hidden_size)
+        
+        self.W_Y = nn.Linear(self.hidden_size, self.hidden_size)
 
     def get_attention_weights(self, queries, keys):
         """Compute the attention weights.
@@ -99,11 +101,14 @@ class MultiHeadedAttention(nn.Module):
             model here, `attention_weights[1, 3, 5, 7] == 0`, since the 8th token
             should not influence on the 6th token (7 > 5).
         """
+        energy = torch.einsum("nhqd,nhkd->nhqk", [queries, keys])
 
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        mask = torch.tril(torch.ones(energy.shape[-2:]), diagonal=1)
+        energy = energy.masked_fill(mask == 0, float('-1e4'))
+
+        return F.softmax(energy / math.sqrt(self.head_size), dim=3)
+
+        
 
     def apply_attention(self, queries, keys, values):
         """Apply the attention.
@@ -152,11 +157,15 @@ class MultiHeadedAttention(nn.Module):
             (concatenated for all heads) for the 3rd token (index 2) of the 1st
             sequence in the batch (index 0).
         """
+        attention = self.get_attention_weights(queries, keys)
 
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        attended_values = torch.einsum("nhqk,nhkd->nhqd", [attention, values])
+        # attention: (batch_size, num_heads, sequence_length, sequence_length)
+        # values: (batch_size, num_heads, sequence_length, head_size)
+        # attended_values: (batch_size, num_heads, sequence_length, dim)
+
+        return self.merge_heads(attended_values)
+        
 
     def split_heads(self, tensor):
         """Split the head vectors.
@@ -181,11 +190,8 @@ class MultiHeadedAttention(nn.Module):
             vectors. Here `dim` is the same dimension as the one in the
             definition of the input `tensor` above.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        return tensor.reshape(tensor.shape[0], self.num_heads, self.sequence_length, tensor.shape[2]//self.num_heads)
+        
 
     def merge_heads(self, tensor):
         """Merge the head vectors.
@@ -209,12 +215,9 @@ class MultiHeadedAttention(nn.Module):
             vectors. Here `dim` is the same dimension as the one in the
             definition of the input `tensor` above.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
-
+        return tensor.reshape(tensor.shape[0], self.sequence_length, self.num_heads * tensor.shape[3])
+ 
+    
     def forward(self, hidden_states):
         """Multi-headed attention.
 
@@ -246,11 +249,18 @@ class MultiHeadedAttention(nn.Module):
             Tensor containing the output of multi-headed attention for all the
             sequences in the batch, and all positions in each sequence.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        W_Q = self.W_Q(hidden_states)
+        W_K = self.W_K(hidden_states)
+        W_V = self.W_V(hidden_states)
+        
+        Q = self.split_heads(W_Q)
+        K = self.split_heads(W_K)
+        V = self.split_heads(W_V)
+        
+        Y = self.apply_attention(Q, K, V)
+        outputs = self.W_Y(Y)
+        
+        return outputs
 
 
 class Block(nn.Module):
@@ -348,11 +358,7 @@ class MiniGPT1(nn.Module):
             is the embedding vector for the token in 3rd position (index 2)
             of the 1st sequence in the batch (index 0).
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        return self.embedding(inputs, torch.arange(self.sequence_length).to(inputs.device))
 
     def forward(self, inputs):
         """Mini GPT-1.
@@ -375,11 +381,7 @@ class MiniGPT1(nn.Module):
             after x_{4} at index 3, and token_{7} for index 6) for the 1st sequence
             of the batch (index 0).
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        return self.classifier(self.get_embeddings(inputs))
 
     def loss(self, log_probas, targets, mask):
         """Loss function.
@@ -406,11 +408,10 @@ class MiniGPT1(nn.Module):
         loss (`torch.FloatTensor` scalar)
             The scalar loss, corresponding to the (mean) negative log-likelihood.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        log_probas = log_probas.permute(0, 2, 1)
+        nll = nn.NLLLoss(reduction='none')
+        losses = nll(log_probas, targets)
+        return torch.sum(losses * mask) / torch.sum(mask)
 
     @classmethod
     def load_embeddings_from(

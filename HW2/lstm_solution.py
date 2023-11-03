@@ -71,16 +71,21 @@ class LSTM(nn.Module):
             - h (`torch.FloatTensor` of shape `(num_layers, batch_size, hidden_size)`)
             - c (`torch.FloatTensor` of shape `(num_layers, batch_size, hidden_size)`)
         """
+        
+        embedding = self.embedding(inputs)
+        output, hidden_states = self.lstm(embedding, hidden_states)
+        log_probas = self.classifier(output)
+        
+        return log_probas, hidden_states
+        
 
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
 
     def loss(self, log_probas, targets, mask):
         """Loss function.
 
         This function computes the loss (negative log-likelihood).
+        Complete the loss() function, that returns the mean negative log-likelihood of the entire
+        sequences in the minibatch (and also averaged over the mini-batch dimension)
 
         Parameters
         ----------
@@ -102,11 +107,11 @@ class LSTM(nn.Module):
         loss (`torch.FloatTensor` scalar)
             The scalar loss, corresponding to the (mean) negative log-likelihood.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        log_probas = log_probas.permute(0, 2, 1)
+        nll = nn.NLLLoss(reduction='none')
+        loss = nll(log_probas, targets)
+        
+        return torch.sum(loss * mask) / torch.sum(mask)
 
     def initial_states(self, batch_size, device=None):
         if device is None:
