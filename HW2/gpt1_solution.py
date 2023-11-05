@@ -103,7 +103,7 @@ class MultiHeadedAttention(nn.Module):
         """
         energy = torch.einsum("nhqd,nhkd->nhqk", [queries, keys])
 
-        mask = torch.tril(torch.ones(energy.shape[-2:]), diagonal=1)
+        mask = torch.tril(torch.ones(energy.shape[-2:]), diagonal=1).to(queries.device)
         energy = energy.masked_fill(mask == 0, float('-1e4'))
 
         return F.softmax(energy / math.sqrt(self.head_size), dim=3)
@@ -358,7 +358,8 @@ class MiniGPT1(nn.Module):
             is the embedding vector for the token in 3rd position (index 2)
             of the 1st sequence in the batch (index 0).
         """
-        return self.embedding(inputs, torch.arange(self.sequence_length).to(inputs.device))
+        position = torch.arange(self.sequence_length).to(inputs.device)
+        return self.embedding(inputs, position)
 
     def forward(self, inputs):
         """Mini GPT-1.
@@ -381,8 +382,16 @@ class MiniGPT1(nn.Module):
             after x_{4} at index 3, and token_{7} for index 6) for the 1st sequence
             of the batch (index 0).
         """
-        return self.classifier(self.get_embeddings(inputs))
+        embeddings = self.get_embeddings(inputs)
+        for layer in self.layers:
+            embeddings = layer(embeddings)
 
+        probas = self.classifier(embeddings)
+        log_probas = F.log_softmax(probas, dim=-1)
+        
+        return log_probas
+    
+    
     def loss(self, log_probas, targets, mask):
         """Loss function.
 

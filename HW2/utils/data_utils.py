@@ -12,7 +12,8 @@ def save_logs(
         valid_times,
         test_loss,
         test_ppl,
-        test_time
+        test_time,
+        avg_steady_state_memory
     ):
     log_dir = os.path.join(args.log_dir, args.exp_id)
     os.makedirs(log_dir, exist_ok=True)
@@ -40,3 +41,5 @@ def save_logs(
         f.write(f"{test_ppl}\n")
     with open(os.path.join(log_dir, "test_time.txt"), "w") as f:
         f.write(f"{test_time}\n")
+    with open(os.path.join(log_dir, "avg_steady_state_memory.txt"), "w") as f:
+        f.write(f"{avg_steady_state_memory}\n")

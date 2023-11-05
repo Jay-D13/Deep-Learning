@@ -1,3 +1,4 @@
 data/
 models/
 *.pdf
+__pycache__/
