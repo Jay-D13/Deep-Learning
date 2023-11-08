@@ -101,12 +101,14 @@ class MultiHeadedAttention(nn.Module):
             model here, `attention_weights[1, 3, 5, 7] == 0`, since the 8th token
             should not influence on the 6th token (7 > 5).
         """
+        _, _, sequence_length, head_size = queries.size()
+    
         energy = torch.einsum("nhqd,nhkd->nhqk", [queries, keys])
 
-        mask = torch.tril(torch.ones(energy.shape[-2:]), diagonal=1).to(queries.device)
-        energy = energy.masked_fill(mask == 0, float('-1e4'))
+        mask = torch.triu(torch.ones((sequence_length, sequence_length)) * float('-1e4'), diagonal=1).to(queries.device)  # Ensure the mask is on the same device as the queries
+        energy = energy.masked_fill(mask == float('-1e4'), float('-1e4'))
 
-        return F.softmax(energy / math.sqrt(self.head_size), dim=3)
+        return F.softmax(energy / math.sqrt(head_size), dim=-1)
 
         
 
@@ -190,7 +192,11 @@ class MultiHeadedAttention(nn.Module):
             vectors. Here `dim` is the same dimension as the one in the
             definition of the input `tensor` above.
         """
-        return tensor.reshape(tensor.shape[0], self.num_heads, self.sequence_length, tensor.shape[2]//self.num_heads)
+        batch_size, sequence_length, hidden_size = tensor.size()
+        tensor = tensor.reshape(batch_size, sequence_length, self.num_heads, hidden_size // self.num_heads)
+        tensor = tensor.permute(0, 2, 1, 3).contiguous()
+        
+        return tensor
         
 
     def merge_heads(self, tensor):
@@ -215,7 +221,11 @@ class MultiHeadedAttention(nn.Module):
             vectors. Here `dim` is the same dimension as the one in the
             definition of the input `tensor` above.
         """
-        return tensor.reshape(tensor.shape[0], self.sequence_length, self.num_heads * tensor.shape[3])
+        batch_size, num_heads, sequence_length, head_size = tensor.size()
+        tensor = tensor.permute(0, 2, 1, 3).contiguous()
+        tensor = tensor.reshape(batch_size, sequence_length, num_heads * head_size)
+
+        return tensor
  
     
     def forward(self, hidden_states):
