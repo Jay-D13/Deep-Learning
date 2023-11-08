@@ -2,3 +2,4 @@ data/
 models/
 *.pdf
 __pycache__/
+.DS_Store
