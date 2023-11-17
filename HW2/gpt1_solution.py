@@ -105,7 +105,7 @@ class MultiHeadedAttention(nn.Module):
     
         energy = torch.einsum("nhqd,nhkd->nhqk", [queries, keys])
 
-        mask = torch.triu(torch.ones((sequence_length, sequence_length)) * float('-1e4'), diagonal=1).to(queries.device)  # Ensure the mask is on the same device as the queries
+        mask = torch.triu(torch.ones((sequence_length, sequence_length)) * float('-1e4'), diagonal=1).to(queries.device)
         energy = energy.masked_fill(mask == float('-1e4'), float('-1e4'))
 
         return F.softmax(energy / math.sqrt(head_size), dim=-1)
