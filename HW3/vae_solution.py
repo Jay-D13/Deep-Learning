@@ -98,13 +98,14 @@ class DiagonalGaussianDistribution(object):
   def kl(self):
     # Compute the KL-Divergence between the distribution with the standard normal N(0, I)
     # Return: Tensor of size (batch size,) containing the KL-Divergence for each element in the batch
-    kl_div = 0.5 * torch.sum(self.var + self.mean.pow(2) - 1 - self.logvar, dim=1)
+    kl_div = 0.5 * torch.sum(self.var + self.mean**2 - 1 - self.logvar, dim=1)
     return kl_div
 
   def nll(self, sample, dims=[1, 2, 3]):
     # Computes the negative log likelihood of the sample under the given distribution
     # Return: Tensor of size (batch size,) containing the log-likelihood for each element in the batch
-    negative_ll = 0.5 * torch.sum((sample - self.mean).pow(2) / self.var + self.logvar, dim=dims)
+    log_2_pi = torch.log(2 * torch.pi * self.var)
+    negative_ll = 0.5 * torch.sum((sample - self.mean)**2 / self.var + log_2_pi, dim=dims)
     return negative_ll
 
   def mode(self):

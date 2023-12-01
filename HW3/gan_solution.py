@@ -127,11 +127,11 @@ def interpolate(generator, z_1, z_2, n_samples):
   #           Should be of size (n_samples, 3, 32, 32)
 
   # WRITE CODE HERE (interpolate z_1 to z_2 with n_samples points and then)
-  with torch.no_grad():
-    z = torch.zeros(n_samples, z_dim, 1, 1).to(device)
-    for i in range(n_samples):
-      z[i] = z_1 + (z_2 - z_1) * i / (n_samples - 1)
-    sample = generator(z)
+  lengths = torch.linspace(0., 1., n_samples).to(z_1.device)
+  z = torch.zeros(n_samples, z_dim, 1, 1).to(z_1.device)
+  for i in range(n_samples):
+    z[i] = z_1 * lengths[i] + z_2 * (1 - lengths[i])
   # WRITE CODE HERE (    generate samples from the respective latents     )
+  sample = generator(z)
   
   return sample

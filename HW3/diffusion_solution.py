@@ -112,7 +112,8 @@ def p_sample_loop(model, shape, timesteps, T, coefficients, noise=None):
         
         for i in tqdm(reversed(range(0, timesteps)), desc='Sampling', total=T, leave=False):
             t = torch.tensor([i] * b, device=model.device)
-            img = p_sample(model, img, t, i, coefficients, noise=noise) # WRITE CODE HERE: Use the p_sample function to denoise from timestep t to timestep t-1
+            n = noise[i+1] if noise is not None else None
+            img = p_sample(model, img, t, i, coefficients, noise=n) # WRITE CODE HERE: Use the p_sample function to denoise from timestep t to timestep t-1
             imgs.append(img.cpu())
         
         return torch.stack(imgs)
